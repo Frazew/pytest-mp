@@ -6,7 +6,9 @@ import collections
 from _pytest import main
 import psutil
 import pytest
+from _pytest.store import StoreKey
 
+xml_key = StoreKey["MPLogXML"]()
 
 def pytest_addoption(parser):
     group = parser.getgroup('pytest-mp')
@@ -379,6 +381,13 @@ def pytest_configure(config):
         synchronization['node_reporters'] = manager.list()
         synchronization['node_reporters_lock'] = multiprocessing.Lock()
         xmlpath = config.option.xmlpath
-        config.pluginmanager.unregister(config._xml)
-        config._xml = MPLogXML(xmlpath, config.option.junitprefix, config.getini("junit_suite_name"), manager)
-        config.pluginmanager.register(config._xml, 'mpjunitxml')
+        config._store[xml_key] = MPLogXML(xmlpath, config.option.junitprefix, config.getini("junit_suite_name"), manager)
+        config.pluginmanager.register(config._store[xml_key], 'mpjunitxml')
+
+
+def pytest_unconfigure(config):
+    xml = config._store.get(xml_key, None)
+    if xml:
+        del config._store[xml_key]
+        config.pluginmanager.unregister(xml)
+
