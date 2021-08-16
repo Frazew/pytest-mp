@@ -1,4 +1,5 @@
 from _pytest.terminal import TerminalReporter
+import multiprocessing
 
 
 # Taken from pytest/_pytest/terminal.py
@@ -14,13 +15,13 @@ class MPTerminalReporter(TerminalReporter):
 
     def __init__(self, reporter, manager):
         TerminalReporter.__init__(self, reporter.config)
-        self._tw = self.writer = reporter.writer  # some monkeypatching needed to access existing writer
+        self._tw = reporter._tw
         self.manager = manager
         self.stats = dict()
         self.stat_keys = ['passed', 'failed', 'error', 'skipped', 'warnings', 'xpassed', 'xfailed', '']
         for key in self.stat_keys:
             self.stats[key] = manager.list()
-        self.stats_lock = manager.Lock()
+        self.stats_lock = multiprocessing.Lock()
         self._progress_items_reported_proxy = manager.Value('i', 0)
 
     def pytest_collectreport(self, report):
@@ -115,19 +116,6 @@ class MPTerminalReporter(TerminalReporter):
                 self.write_sep("_", msg)
                 if not self.config.getvalue("usepdb"):
                     self._outrep_summary(report)
-
-    def _write_progress_if_past_edge(self):
-        if not self._show_progress_info:
-            return
-        last_item = self._progress_items_reported_proxy.value == self._session.testscollected
-        if last_item:
-            self._write_progress_information_filling_space()
-            return
-
-        past_edge = self._tw.chars_on_current_line + self._PROGRESS_LENGTH + 1 >= self._screen_width
-        if past_edge:
-            msg = self._get_progress_information_message()
-            self._tw.write(msg + '\n', cyan=True)
 
     def _get_progress_information_message(self):
         collected = self._session.testscollected

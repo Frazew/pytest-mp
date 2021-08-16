@@ -363,6 +363,10 @@ def pytest_configure(config):
                             "grouped w/ desired strategy: 'free' (default), 'serial', "
                             "'isolated_free', or 'isolated_serial'.")
 
+    if config.option.use_mp is None:
+        if not config.getini('mp'):
+            return
+
     standard_reporter = config.pluginmanager.get_plugin('terminalreporter')
     if standard_reporter:
         from pytest_mp.terminal import MPTerminalReporter
@@ -370,14 +374,10 @@ def pytest_configure(config):
         config.pluginmanager.unregister(standard_reporter)
         config.pluginmanager.register(mp_reporter, 'terminalreporter')
 
-    if config.option.use_mp is None:
-        if not config.getini('mp'):
-            return
-
     if config.option.xmlpath is not None:
         from pytest_mp.junitxml import MPLogXML
         synchronization['node_reporters'] = manager.list()
-        synchronization['node_reporters_lock'] = manager.Lock()
+        synchronization['node_reporters_lock'] = multiprocessing.Lock()
         xmlpath = config.option.xmlpath
         config.pluginmanager.unregister(config._xml)
         config._xml = MPLogXML(xmlpath, config.option.junitprefix, config.getini("junit_suite_name"), manager)
