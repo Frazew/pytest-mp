@@ -2,7 +2,8 @@ import time
 import sys
 import os
 
-from _pytest.junitxml import _NodeReporter, LogXML, Junit
+from _pytest.junitxml import _NodeReporter, LogXML
+import xml.etree.ElementTree as ET
 import py
 
 from pytest_mp.plugin import synchronization
@@ -25,7 +26,7 @@ else:
 class MPNodeReporter(_NodeReporter):
 
     def finalize(self):
-        data = self.to_xml().unicode(indent=0)
+        data = self.to_xml()
         self.__dict__.clear()
         self.to_xml = lambda: py.xml.raw(data)
         with synchronization['node_reporters_lock']:
@@ -56,15 +57,26 @@ class MPLogXML(LogXML):
                     self.cnt_double_fail_tests)
         logfile.write('<?xml version="1.0" encoding="utf-8"?>')
 
-        logfile.write(Junit.testsuite(
+        suite_node = ET.Element(
+            "testsuite",
             self._get_global_properties_node(),
-            [py.xml.raw(x) for x in synchronization['node_reporters']],  # Synchronization
             name=self.suite_name,
             errors=self.stats['error'],
             failures=self.stats['failure'],
             skips=self.stats['skipped'],
             tests=numtests,
-            time="%.3f" % suite_time_delta).unicode(indent=0))
+            time="%.3f" % suite_time_delta
+        )
+
+        global_properties = self._get_global_properties_node()
+        if global_properties is not None:
+            suite_node.append(global_properties)
+        for node_reporter in synchronization['node_reporters']:  # Synchronization
+            suite_node.append(py.xml.raw(x))
+
+        testsuites = ET.Element("testsuites")
+        testsuites.append(suite_node)
+        logfile.write(ET.tostring(testsuites, encoding="unicode"))
         logfile.close()
 
     def add_stats(self, key):
