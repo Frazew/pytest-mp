@@ -1,8 +1,12 @@
 import time
 import sys
 import os
+import platform
+import multiprocessing
 
+from datetime import datetime
 from _pytest.junitxml import _NodeReporter, LogXML
+from contextvars import ContextVar
 import xml.etree.ElementTree as ET
 import py
 
@@ -18,6 +22,9 @@ else:
     long = int
 
 
+node_reporters_lock = ContextVar("Lock")
+
+
 # Taken from pytest/_pytest/junitxml.py
 # but uses synchronization dict store
 # Thanks to pytest-concurrent for approach
@@ -25,11 +32,14 @@ else:
 
 class MPNodeReporter(_NodeReporter):
 
+    def __init__(self, *args, **kwargs):
+        _NodeReporter.__init__(self, *args, **kwargs)
+
     def finalize(self):
         data = self.to_xml()
         self.__dict__.clear()
-        self.to_xml = lambda: py.xml.raw(data)
-        with synchronization['node_reporters_lock']:
+        self.to_xml = lambda: data
+        with node_reporters_lock.get():
             synchronization['node_reporters'].append(data)
 
 
@@ -43,41 +53,48 @@ class MPLogXML(LogXML):
         self.stats['failure'] = 0
         self.stats['skipped'] = 0
         self.stats_lock = manager.Lock()
+        node_reporters_lock.set(multiprocessing.Lock())
 
-    def pytest_sessionfinish(self):
+    def pytest_sessionfinish(self) -> None:
         dirname = os.path.dirname(os.path.abspath(self.logfile))
         if not os.path.isdir(dirname):
             os.makedirs(dirname)
-        logfile = open(self.logfile, 'w', encoding='utf-8')
-        suite_stop_time = time.time()
-        suite_time_delta = suite_stop_time - self.suite_start_time
 
-        numtests = (self.stats['passed'] + self.stats['failure'] +  # noqa W504
-                    self.stats['skipped'] + self.stats['error'] -  # noqa W504
-                    self.cnt_double_fail_tests)
-        logfile.write('<?xml version="1.0" encoding="utf-8"?>')
+        with open(self.logfile, "w", encoding="utf-8") as logfile:
+            suite_stop_time = timing.time()
+            suite_time_delta = suite_stop_time - self.suite_start_time
 
-        suite_node = ET.Element(
-            "testsuite",
-            self._get_global_properties_node(),
-            name=self.suite_name,
-            errors=self.stats['error'],
-            failures=self.stats['failure'],
-            skips=self.stats['skipped'],
-            tests=numtests,
-            time="%.3f" % suite_time_delta
-        )
+            numtests = (
+                self.stats["passed"]
+                + self.stats["failure"]
+                + self.stats["skipped"]
+                + self.stats["error"]
+                - self.cnt_double_fail_tests
+            )
+            logfile.write('<?xml version="1.0" encoding="utf-8"?>')
 
-        global_properties = self._get_global_properties_node()
-        if global_properties is not None:
-            suite_node.append(global_properties)
-        for node_reporter in synchronization['node_reporters']:  # Synchronization
-            suite_node.append(py.xml.raw(x))
+            suite_node = ET.Element(
+                "testsuite",
+                name=self.suite_name,
+                errors=str(self.stats["error"]),
+                failures=str(self.stats["failure"]),
+                skipped=str(self.stats["skipped"]),
+                tests=str(numtests),
+                time="%.3f" % suite_time_delta,
+                timestamp=datetime.fromtimestamp(self.suite_start_time).isoformat(),
+                hostname=platform.node(),
+            )
+            global_properties = self._get_global_properties_node()
+            if global_properties is not None:
+                suite_node.append(global_properties)
+            with node_reporters_lock.get():
+                for node_reporter in synchronization['node_reporters']:  # Synchronization
+                    suite_node.append(node_reporter.to_xml())
 
-        testsuites = ET.Element("testsuites")
-        testsuites.append(suite_node)
-        logfile.write(ET.tostring(testsuites, encoding="unicode"))
-        logfile.close()
+            testsuites = ET.Element("testsuites")
+            testsuites.append(suite_node)
+            logfile.write(ET.tostring(testsuites, encoding="unicode"))
+
 
     def add_stats(self, key):
         with self.stats_lock:
