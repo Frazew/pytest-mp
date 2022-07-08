@@ -23,6 +23,7 @@ class MPTerminalReporter(TerminalReporter):
             self.stats[key] = manager.list()
         self.stats_lock = multiprocessing.Lock()
         self._progress_items_reported_proxy = manager.Value('i', 0)
+        self.progress_lock = multiprocessing.Lock()
 
     def pytest_collectreport(self, report):
         # Show errors occurred during the collection instantly.
@@ -41,64 +42,34 @@ class MPTerminalReporter(TerminalReporter):
         if not self.config.option.instafail:
             TerminalReporter.summary_errors(self)
 
+    def pytest_runtest_logstart(self, nodeid, location):
+        pass
+
     def pytest_runtest_logreport(self, report):
-        rep = report
-        # following example here https://github.com/pytest-dev/pytest/blob/03ef54670662def8422ec983969b81250d543433/src/_pytest/terminal.py#L387
-        res = self.config.hook.pytest_report_teststatus(report=rep, config=self.config)
-        cat, letter, word = res
+        with self.progress_lock:
+            # following example here https://github.com/pytest-dev/pytest/blob/03ef54670662def8422ec983969b81250d543433/src/_pytest/terminal.py#L387
+            res = self.config.hook.pytest_report_teststatus(report=report, config=self.config)
+            cat, letter, word = res
 
-        # This helps make TerminalReporter process-safe.
-        with self.stats_lock:
-            if cat in self.stat_keys:
-                self.stats[cat].append(rep)
-            else:  # not expected and going to be dropped.  TODO: fix this.
-                cat_list = self.stats.get(cat, [])
-                cat_list.append(rep)
-                self.stats[cat] = cat_list
+            # This helps make TerminalReporter process-safe.
+            with self.stats_lock:
+                if cat in self.stat_keys:
+                    self.stats[cat].append(report)
+                else:  # not expected and going to be dropped.  TODO: fix this.
+                    cat_list = self.stats.get(cat, [])
+                    cat_list.append(report)
+                    self.stats[cat] = cat_list
 
-        self._tests_ran = True
-        if not letter and not word:
-            # probably passed setup/teardown
-            return
+            self._tests_ran = True
+            if not letter and not word:
+                # probably passed setup/teardown
+                return
 
-        # This helps make TerminalReporter process-safe.
-        with self.stats_lock:
-            self._progress_items_reported_proxy.value += 1
+            # This helps make TerminalReporter process-safe.
+            with self.stats_lock:
+                self._progress_items_reported_proxy.value += 1
 
-        if self.verbosity <= 0:
-            if not hasattr(rep, 'node') and self.showfspath:
-                self.write_fspath_result(rep.nodeid, letter)
-            else:
-                self._tw.write(letter)
-        else:
-            if isinstance(word, tuple):
-                word, markup = word
-            else:
-                if rep.passed:
-                    markup = {'green': True}
-                elif rep.failed:
-                    markup = {'red': True}
-                elif rep.skipped:
-                    markup = {'yellow': True}
-            line = self._locationline(rep.nodeid, *rep.location)
-            if not hasattr(rep, 'node'):
-                self.write_ensure_prefix(line, word, **markup)
-            else:
-                self.ensure_newline()
-                if hasattr(rep, 'node'):
-                    self._tw.write("[%s] " % rep.node.gateway.id)
-                if getattr(self, '_show_progress_info', False):
-                    self._tw.write(self._get_progress_information_message() + " ", cyan=True)
-                else:
-                    self._tw.write(' ')
-                self._tw.write(word, **markup)
-                self._tw.write(" " + line)
-                self.currentfspath = -2
-
-        if self.config.option.instafail and report.failed and not hasattr(report, 'wasxfail'):
-            if self.verbosity <= 0:
-                self._tw.line()
-            self.print_failure(report)
+            return super().pytest_runtest_logreport(report)
 
     def print_failure(self, report):
         if self.config.option.tbstyle != "no":
