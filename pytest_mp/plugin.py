@@ -385,6 +385,12 @@ def pytest_configure(config):
         config._store[xml_key] = MPLogXML(xmlpath, config.option.junitprefix, config.getini("junit_suite_name"), manager)
         config.pluginmanager.register(config._store[xml_key], 'mpjunitxml')
 
+    if config.getoption("htmlpath") is not None:
+        from pytest_mp.html_report import MPHTMLReport
+        config.pluginmanager.unregister(config._html)
+        config._html = MPHTMLReport(config.getoption("htmlpath"), config, manager)
+        config.pluginmanager.register(config._html)
+
 
 def pytest_unconfigure(config):
     xml = config._store.get(xml_key, None)
