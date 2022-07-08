@@ -378,8 +378,10 @@ def pytest_configure(config):
 
     if config.option.xmlpath is not None:
         from pytest_mp.junitxml import MPLogXML
+        from _pytest.junitxml import xml_key as log_xml
         synchronization['node_reporters'] = manager.list()
         xmlpath = config.option.xmlpath
+        config.pluginmanager.unregister(config._store[log_xml])
         config._store[xml_key] = MPLogXML(xmlpath, config.option.junitprefix, config.getini("junit_suite_name"), manager)
         config.pluginmanager.register(config._store[xml_key], 'mpjunitxml')
 
